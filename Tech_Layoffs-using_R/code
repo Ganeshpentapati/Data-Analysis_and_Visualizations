@@ -1,1 +1,309 @@
 
+install.packages(c("readxl", "writexl", "dplyr", "ggplot2", "tidyr"))
+
+library(readxl)
+library(writexl) 
+library(dplyr) 
+library(ggplot2)
+library(tidyr)
+
+df <- read_excel("C:/Users/Lenovo/Downloads/tech_layoffs.xlsx", sheet = 1)
+print(typeof(df))
+print(df)
+
+
+
+
+# 1st - Visualization(Continent wise Layoffs):
+
+Continent = df$Continent
+LaidOffs = df$Laid_Off
+
+ggplot(df, aes(x=Continent,y=LaidOffs)) + geom_bar(stat="identity")
+
+mean_perc <- mean(df$Percentage)
+
+# Define low_bound and high_bound based on mean_perc
+low_bound <- df[df$Percentage < mean_perc, ]
+high_bound <- df[df$Percentage >= mean_perc, ]
+
+# Plotting
+ggplot() +
+  geom_point(data = low_bound, aes(x = Continent, y = Percentage, color = "Low"), size = 3) +
+  geom_point(data = high_bound, aes(x = Continent, y = Percentage, color = "High"), size = 3) +
+  scale_color_manual(values = c("Low" = "darkblue", "High" = "darkred")) +
+  labs(title = "Continent vs Laid-Off Percentage",
+       x = "Continent",
+       y = "Laid-Off Percentage") +
+  theme_minimal()
+
+# Min-max scaling function
+min_max_scale <- function(x) {
+  return((x - min(x)) / (max(x) - min(x)))
+}
+
+# Apply min-max scaling to Laid_Off column
+df$LaidOffs_scaled <- min_max_scale(df$Laid_Off)
+
+# Plot using min-max scaled values
+ggplot(df, aes(x = Continent, y = LaidOffs_scaled)) + 
+  geom_bar(stat = "identity") +
+  labs(title = "Continent vs Min-Max Scaled Laid-Off Percentage")
+
+
+
+
+
+# 2nd - Visualization(Year wise Layoffs percent):
+
+# Assuming your dataframe is named df and contains columns 'Year' and 'Percentage'
+
+# Group by Year and calculate the mean Percentage for each year
+df_avg <- df %>%
+  group_by(Year) %>%
+  summarise(avg_percentage = mean(Percentage))
+
+# Plot the line graph
+ggplot(data=df_avg, aes(x=Year, y=avg_percentage)) +
+  geom_line(color="red") +
+  geom_point() + 
+  labs(title = "Year vs Avg Percentage Laid Off")
+
+df_avg <- df %>%
+  group_by(Industry) %>%
+  summarise(avg_laidOff = mean(Percentage))
+
+
+
+
+# 3rd - Visualization(Layoffs Over Time for Top 5 Companies):
+
+# Convert date column to Date type
+df$Date_layoffs <- as.Date(df$Date_layoffs)
+
+# Get top 5 companies by total layoffs
+top_companies <- df %>%
+  group_by(Company) %>%
+  summarise(total_laid_off = sum(Laid_Off, na.rm = TRUE)) %>%
+  arrange(desc(total_laid_off)) %>%
+  slice(1:5) %>%
+  pull(Company)
+
+# Filter data for those companies
+df_top <- df %>% filter(Company %in% top_companies)
+
+# Plot
+ggplot(df_top, aes(x = Date_layoffs, y = Laid_Off, color = Company)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Layoffs Over Time for Top 5 Companies",
+    x = "Date",
+    y = "Number of Layoffs"
+  ) +
+  theme_minimal()
+
+
+
+
+# 4th - Visualization(Before vs After Company Size):
+
+# Clean and filter relevant columns
+df_slope <- df %>%
+  filter(!is.na(Company_Size_before_Layoffs), !is.na(Company_Size_after_layoffs)) %>%
+  group_by(Company) %>%
+  summarise(
+    Before = mean(Company_Size_before_Layoffs, na.rm = TRUE),
+    After = mean(Company_Size_after_layoffs, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Before)) %>%
+  slice(1:10)  # Top 10 by size
+
+# Reshape for slope plot
+df_long <- pivot_longer(df_slope, cols = c(Before, After), names_to = "Stage", values_to = "Size")
+
+# Plot
+ggplot(df_long, aes(x = Stage, y = Size, group = Company, color = Company)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  labs(
+    title = "Change in Company Size Before vs After Layoffs",
+    x = "",
+    y = "Company Size"
+  ) +
+  theme_minimal()
+
+
+
+
+# 5th - Visualization(Company Size & Layoffs Severity):
+
+# Clean: Remove rows with missing values for key columns
+df_clean <- df %>%
+  filter(!is.na(Company_Size_before_Layoffs), !is.na(Percentage))
+
+# Create a new 'Severity' column
+df_clean <- df_clean %>%
+  mutate(Severity = ifelse(Percentage > 30, "High", "Low"))
+
+# Plot
+ggplot(df_clean, aes(x = Company_Size_before_Layoffs, y = Percentage, color = Severity)) +
+  geom_point(alpha = 0.7, size = 3) +
+  scale_color_manual(values = c("High" = "black", "Low" = "gold")) +
+  labs(
+    title = "Layoffs Severity vs Company Size",
+    x = "Company Size Before Layoffs",
+    y = "Percentage Laid Off",
+    color = "Layoff Severity"
+  ) +
+  theme_minimal()
+
+#Description(5th):
+#Smaller companies tend to show greater percentage layoffs compared
+#to larger ones, with a significant portion exceeding the 30% 
+#mark — signaling critical organizational impact. This can indicate higher
+#risk during downturns or funding shortfalls.
+
+
+
+
+# 6th - Visualization(Correlation b/w Company Size & Laidoff percent):
+
+# Clean and prep data
+df_clean <- df %>%
+  filter(!is.na(Company_Size_before_Layoffs), !is.na(Percentage))
+
+# --- PART 1: Categorize Companies ---
+# Define company size bins
+df_clean <- df_clean %>%
+  mutate(Size_Category = case_when(
+    Company_Size_before_Layoffs < 500 ~ "Small",
+    Company_Size_before_Layoffs >= 500 & Company_Size_before_Layoffs <= 5000 ~ "Medium",
+    Company_Size_before_Layoffs > 5000 ~ "Large"
+  ))
+
+# Calculate average percentage laid off per category
+avg_layoff_by_size <- df_clean %>%
+  group_by(Size_Category) %>%
+  summarise(Average_LaidOff_Percentage = mean(Percentage, na.rm = TRUE))
+
+# Plot: Bar chart
+ggplot(avg_layoff_by_size, aes(x = Size_Category, y = Average_LaidOff_Percentage, fill = Size_Category)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Average Layoff Percentage by Company Size Category",
+    x = "Company Size Category",
+    y = "Avg % Laid Off"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("Small" = "black", "Medium" = "navyblue", "Large" = "gold")) +
+  theme(legend.position = "none")
+
+
+
+
+# 7th - Visualization(Layoffs Over Time for Individual Companies(top-5)):
+
+df$Date_layoffs <- as.Date(df$Date_layoffs)
+
+# Filter companies with multiple layoffs
+company_counts <- df %>%
+  group_by(Company) %>%
+  summarise(layoff_events = n()) %>%
+  filter(layoff_events > 1)
+
+# Get top 5 with highest total layoffs among them
+top_companies_multi <- df %>%
+  filter(Company %in% company_counts$Company) %>%
+  group_by(Company) %>%
+  summarise(total_laid_off = sum(Laid_Off, na.rm = TRUE)) %>%
+  arrange(desc(total_laid_off)) %>%
+  slice(1:5) %>%
+  pull(Company)
+
+df_top_multi <- df %>% filter(Company %in% top_companies_multi)
+
+# Faceted line chart (mini charts per company)
+
+ggplot(df_top_multi, aes(x = Date_layoffs, y = Laid_Off)) +
+  geom_line(color = "steelblue", size = 1) +
+  geom_point(color = "darkblue", size = 2) +
+  facet_wrap(~ Company, scales = "free_y") +
+  scale_x_date(date_labels = "%Y", date_breaks = "1 year") +  # Show only years
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate date labels
+    strip.text = element_text(size = 12, face = "bold")
+  ) +
+  labs(
+    title = "Layoffs Over Time (Faceted by Company)",
+    x = "Year",
+    y = "Laid Off Employees"
+  )
+
+
+
+# 8th - Visualizations():
+
+# Filter out NA values in Percentage
+df_clean <- df %>% filter(!is.na(Percentage))
+
+
+# a(Layoff % by Industry):
+# Filter industries with more than 5 companies to avoid clutter
+industry_counts <- df_clean %>%
+  group_by(Industry) %>%
+  summarise(n = n()) %>%
+  filter(n > 5)
+
+df_box <- df_clean %>% filter(Industry %in% industry_counts$Industry)
+
+ggplot(df_box, aes(x = reorder(Industry, Percentage, median), y = Percentage)) +
+  geom_boxplot(fill = "white", outlier.color = "red", outlier.shape = 8) +
+  coord_flip() +
+  labs(
+    title = "% of Workforce Laid Off by Industry",
+    x = "Industry",
+    y = "% Laid Off"
+  ) +
+  theme_minimal()
+
+
+#b(Layoff % Distribution):
+ggplot(df_clean, aes(x = Percentage)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white", boundary = 0) +
+  labs(
+    title = "Distribution of Percent of Workforce Laid Off",
+    x = "% Laid Off",
+    y = "Number of Companies"
+  ) +
+  theme_minimal()
+
+
+# 9th - Visualization(Categorizing companies in the dataset):optional
+
+df_clean <- df %>%
+  filter(!is.na(Company_Size_before_Layoffs)) %>%
+  mutate(Size_Category = case_when(
+    Company_Size_before_Layoffs < 500 ~ "Small",
+    Company_Size_before_Layoffs >= 500 & Company_Size_before_Layoffs <= 5000 ~ "Medium",
+    Company_Size_before_Layoffs > 5000 ~ "Large"
+  ))
+
+
+# Count of companies in each category
+df_count <- df_clean %>%
+  group_by(Size_Category) %>%
+  summarise(Company_Count = n())
+
+ggplot(df_count, aes(x = Size_Category, y = Company_Count, fill = Size_Category)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Number of Companies by Size Category",
+    x = "Size Category",
+    y = "Number of Companies"
+  ) +
+  scale_fill_manual(values = c("Small" = "black", "Medium" = "steelblue", "Large" = "navy")) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
